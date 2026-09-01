@@ -282,6 +282,68 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const currentTrack = currentIndex >= 0 ? (queue[currentIndex] ?? null) : null;
 
+  // Controles del sistema (pantalla de bloqueo, auriculares, auto) vía Media Session API.
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.setActionHandler('play', () => {
+      playerRef.current?.playVideo();
+    });
+    navigator.mediaSession.setActionHandler('pause', () => {
+      playerRef.current?.pauseVideo();
+    });
+    navigator.mediaSession.setActionHandler('previoustrack', () => previous());
+    navigator.mediaSession.setActionHandler('nexttrack', () => next());
+    navigator.mediaSession.setActionHandler('seekto', (details) => {
+      if (details.seekTime == null) return;
+      playerRef.current?.seekTo(details.seekTime, true);
+      setProgress(details.seekTime);
+    });
+    return () => {
+      navigator.mediaSession.setActionHandler('play', null);
+      navigator.mediaSession.setActionHandler('pause', null);
+      navigator.mediaSession.setActionHandler('previoustrack', null);
+      navigator.mediaSession.setActionHandler('nexttrack', null);
+      navigator.mediaSession.setActionHandler('seekto', null);
+    };
+  }, [next, previous]);
+
+  // Metadata (título, artista, portada) que muestra el sistema en la pantalla de bloqueo.
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.metadata = currentTrack
+      ? new MediaMetadata({
+          title: currentTrack.title,
+          artist: currentTrack.channelTitle,
+          artwork: [
+            { src: currentTrack.thumbnail, sizes: '480x360', type: 'image/jpeg' },
+          ],
+        })
+      : null;
+  }, [currentTrack]);
+
+  // Estado de reproducción (afecta el ícono play/pause que muestra el sistema).
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+  }, [isPlaying]);
+
+  // Posición actual, para la barra de progreso de la pantalla de bloqueo.
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState)
+      return;
+    if (!duration || !Number.isFinite(duration) || duration <= 0) return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate: 1,
+        position: Math.min(progress, duration),
+      });
+    } catch {
+      // Vite/algunos navegadores pueden tirar un error transitorio con valores
+      // desincronizados justo al cambiar de canción; no es crítico, se ignora.
+    }
+  }, [progress, duration]);
+
   const value: PlayerContextValue = {
     currentTrack,
     queue,

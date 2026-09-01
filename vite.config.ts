@@ -10,8 +10,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/apple-touch-icon.png'],
       manifest: {
-        name: 'MusicPlayerApp',
-        short_name: 'MusicPlayer',
+        name: 'MusicJandroapp',
+        short_name: 'MusicJ',
         description:
           'Buscá música en YouTube, guardala en tu biblioteca y reproducila como una app, con cola y sugerencias similares.',
         theme_color: '#0b0b10',

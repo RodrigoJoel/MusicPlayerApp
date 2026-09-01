@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { BottomNav } from './components/BottomNav';
 import { LibraryView } from './components/LibraryView';
+import { NoteIcon } from './components/NoteIcon';
 import { NowPlayingBar } from './components/NowPlayingBar';
 import { QueueView } from './components/QueueView';
 import { SearchView } from './components/SearchView';
@@ -15,8 +16,14 @@ function AppShell() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <span className="app-header__logo">♪</span>
-        <span className="app-header__name">MusicPlayerApp</span>
+        <span className="app-header__logo">
+          <NoteIcon />
+        </span>
+        <span className="app-header__name">
+          Music
+          <NoteIcon className="app-header__name-note" />
+          <span className="app-header__name-small">androapp</span>
+        </span>
       </header>
 
       <main className="app-main">

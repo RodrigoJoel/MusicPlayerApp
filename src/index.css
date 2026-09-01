@@ -102,19 +102,41 @@ code {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   width: 32px;
   height: 32px;
   border-radius: 9px;
   background: var(--accent-gradient);
   color: #fff;
-  font-size: 18px;
-  font-weight: 700;
+}
+
+.app-header__logo svg {
+  width: 18px;
+  height: 18px;
 }
 
 .app-header__name {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+  font-family: 'Poppins', var(--sans);
   font-weight: 700;
-  font-size: 17px;
+  font-size: 19px;
   letter-spacing: -0.2px;
+}
+
+.app-header__name-note {
+  width: 15px;
+  height: 15px;
+  align-self: center;
+  color: var(--accent-2);
+}
+
+.app-header__name-small {
+  font-family: 'Poppins', var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
 }
 
 .app-main {
