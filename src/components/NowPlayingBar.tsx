@@ -34,10 +34,40 @@ export function NowPlayingBar() {
 
   return (
     <div className={`now-playing${hasTrack ? '' : ' now-playing--empty'}`}>
-      {/* El player real de YouTube vive acá siempre montado, en tamaño mini. */}
-      <div className="now-playing__video">
+      
+      {/* TRUCO ANTI-ANUNCIOS: El player real de YouTube ahora vive oculto fuera de pantalla */}
+      <div 
+        className="now-playing__hidden-video"
+        style={{
+          width: '0px',
+          height: '0px',
+          overflow: 'hidden',
+          position: 'absolute',
+          top: '-9999px',
+          left: '-9999px',
+          opacity: 0,
+          pointerEvents: 'none'
+        }}
+      >
         <div id={YT_PLAYER_ROOT_ID} />
-        {!hasTrack && <div className="now-playing__video-placeholder" />}
+      </div>
+
+      {/* INTERFAZ VISUAL: Renderizamos una carátula estática en lugar del iframe de YT */}
+      <div className="now-playing__video">
+        {hasTrack ? (
+          <img 
+            src={currentTrack!.thumbnail} 
+            alt={currentTrack!.title}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              borderRadius: '4px'
+            }}
+          />
+        ) : (
+          <div className="now-playing__video-placeholder" />
+        )}
       </div>
 
       {hasTrack ? (

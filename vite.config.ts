@@ -50,4 +50,9 @@ export default defineConfig({
       },
     }),
   ],
+  // TRUCO: Fijamos el puerto exacto autorizado en las credenciales de Google API
+  server: {
+    port: 5173,
+    strictPort: true,
+  },
 })

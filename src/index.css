@@ -384,6 +384,8 @@ code {
 
 /* ---------- Now playing bar ---------- */
 
+/* ---------- Now playing bar ---------- */
+
 .now-playing {
   position: fixed;
   bottom: var(--nav-height);
@@ -406,6 +408,7 @@ code {
   color: var(--text-faint);
 }
 
+/* El contenedor estético que ahora aloja tu carátula <img> manual */
 .now-playing__video {
   position: relative;
   flex-shrink: 0;
@@ -416,10 +419,16 @@ code {
   background: #000;
 }
 
-.now-playing__video #yt-player-root {
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
+/* TRUCO ANTI-ANUNCIOS: Forzamos al iframe a quedar fuera de la vista del navegador */
+.now-playing__hidden-video {
+  width: 0px !important;
+  height: 0px !important;
+  overflow: hidden !important;
+  position: absolute !important;
+  top: -9999px !important;
+  left: -9999px !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 
 .now-playing__video-placeholder {
@@ -523,6 +532,7 @@ code {
     display: none;
   }
 }
+
 
 /* ---------- Bottom nav ---------- */
 
