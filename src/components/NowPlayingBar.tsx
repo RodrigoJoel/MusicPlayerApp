@@ -7,6 +7,7 @@ import {
   PlayIcon,
   PrevIcon,
   RepeatIcon,
+  ShuffleSimilarIcon,
   VolumeIcon,
 } from './Icon';
 
@@ -18,12 +19,14 @@ export function NowPlayingBar() {
     duration,
     volume,
     repeatMode,
+    isShuffled,
     togglePlay,
     next,
     previous,
     seekTo,
     setVolume,
     cycleRepeat,
+    toggleShuffle,
   } = usePlayer();
 
   const [seekValue, setSeekValue] = useState<number | null>(null);
@@ -79,6 +82,15 @@ export function NowPlayingBar() {
 
           <div className="now-playing__center">
             <div className="now-playing__controls">
+              <button
+                type="button"
+                className={`icon-btn${isShuffled ? ' icon-btn--active' : ''}`}
+                onClick={toggleShuffle}
+                title={`Aleatorio: ${isShuffled ? 'activado' : 'desactivado'}`}
+                aria-label="Cambiar modo aleatorio"
+              >
+                <ShuffleSimilarIcon size={18} />
+              </button>
               <button
                 type="button"
                 className="icon-btn"

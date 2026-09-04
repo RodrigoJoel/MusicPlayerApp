@@ -29,6 +29,7 @@ interface PlayerContextValue {
   duration: number;
   volume: number;
   repeatMode: RepeatMode;
+  isShuffled: boolean;
   isLoadingSimilar: boolean;
   playTrack: (track: Track, queueContext?: Track[]) => void;
   playQueue: (tracks: Track[], startIndex?: number) => void;
@@ -40,12 +41,27 @@ interface PlayerContextValue {
   seekTo: (seconds: number) => void;
   setVolume: (value: number) => void;
   cycleRepeat: () => void;
+  toggleShuffle: () => void;
   playSimilar: (track: Track) => Promise<void>;
 }
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
 
 let apiLoadPromise: Promise<void> | null = null;
+
+/**
+ * Genera un orden aleatorio de índices de `length` elementos. Si `anchorIdx`
+ * es válido, queda fijo en la primera posición (la canción actual no salta
+ * al activar el modo aleatorio).
+ */
+function buildShuffleOrder(length: number, anchorIdx: number): number[] {
+  const rest = Array.from({ length }, (_, i) => i).filter((i) => i !== anchorIdx);
+  for (let i = rest.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [rest[i], rest[j]] = [rest[j], rest[i]];
+  }
+  return anchorIdx >= 0 && anchorIdx < length ? [anchorIdx, ...rest] : rest;
+}
 
 /** Carga el script externo de la YouTube IFrame Player API una sola vez. */
 function loadYouTubeApi(): Promise<void> {
@@ -78,6 +94,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const indexRef = useRef(-1);
   const repeatRef = useRef<RepeatMode>('off');
   const volumeRef = useRef(80);
+  const isShuffledRef = useRef(false);
+  const shuffleOrderRef = useRef<number[]>([]);
+  const shufflePosRef = useRef(0);
 
   const [isReady, setIsReady] = useState(false);
   const [queue, setQueue] = useState<Track[]>([]);
@@ -87,6 +106,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [duration, setDuration] = useState(0);
   const [volume, setVolumeState] = useState(80);
   const [repeatMode, setRepeatMode] = useState<RepeatMode>('off');
+  const [isShuffled, setIsShuffled] = useState(false);
   const [isLoadingSimilar, setIsLoadingSimilar] = useState(false);
 
   useEffect(() => {
@@ -101,8 +121,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     volumeRef.current = volume;
   }, [volume]);
+  useEffect(() => {
+    isShuffledRef.current = isShuffled;
+  }, [isShuffled]);
 
-  const playByIndex = useCallback((idx: number, tracks: Track[]) => {
+  // Si la cola cambia (se agregan/quitan canciones) mientras el modo
+  // aleatorio está activo, regenera el orden para que siga siendo válido.
+  useEffect(() => {
+    if (!isShuffled) return;
+    shuffleOrderRef.current = buildShuffleOrder(queue.length, indexRef.current);
+    shufflePosRef.current = 0;
+  }, [queue, isShuffled]);
+
+  const loadIndex = useCallback((idx: number, tracks: Track[]) => {
     if (idx < 0 || idx >= tracks.length) return;
     setCurrentIndex(idx);
     setProgress(0);
@@ -114,16 +145,41 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const playByIndex = useCallback(
+    (idx: number, tracks: Track[]) => {
+      if (idx < 0 || idx >= tracks.length) return;
+      if (isShuffledRef.current) {
+        shuffleOrderRef.current = buildShuffleOrder(tracks.length, idx);
+        shufflePosRef.current = 0;
+      }
+      loadIndex(idx, tracks);
+    },
+    [loadIndex],
+  );
+
   const next = useCallback(() => {
     const tracks = queueRef.current;
     if (tracks.length === 0) return;
+
+    if (isShuffledRef.current) {
+      let nextPos = shufflePosRef.current + 1;
+      if (nextPos >= shuffleOrderRef.current.length) {
+        if (repeatRef.current !== 'all') return;
+        shuffleOrderRef.current = buildShuffleOrder(tracks.length, -1);
+        nextPos = 0;
+      }
+      shufflePosRef.current = nextPos;
+      loadIndex(shuffleOrderRef.current[nextPos], tracks);
+      return;
+    }
+
     let nextIdx = indexRef.current + 1;
     if (nextIdx >= tracks.length) {
       if (repeatRef.current === 'all') nextIdx = 0;
       else return;
     }
-    playByIndex(nextIdx, tracks);
-  }, [playByIndex]);
+    loadIndex(nextIdx, tracks);
+  }, [loadIndex]);
 
   const previous = useCallback(() => {
     const tracks = queueRef.current;
@@ -134,12 +190,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setProgress(0);
       return;
     }
+
+    if (isShuffledRef.current) {
+      const order = shuffleOrderRef.current;
+      if (order.length === 0) return;
+      let prevPos = shufflePosRef.current - 1;
+      if (prevPos < 0) {
+        prevPos = repeatRef.current === 'all' ? order.length - 1 : 0;
+      }
+      shufflePosRef.current = prevPos;
+      loadIndex(order[prevPos], tracks);
+      return;
+    }
+
     let prevIdx = indexRef.current - 1;
     if (prevIdx < 0) {
       prevIdx = repeatRef.current === 'all' ? tracks.length - 1 : 0;
     }
-    playByIndex(prevIdx, tracks);
-  }, [playByIndex]);
+    loadIndex(prevIdx, tracks);
+  }, [loadIndex]);
 
   // Inicializa el player de YouTube una sola vez, montado en un <div> fijo.
   useEffect(() => {
@@ -267,6 +336,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const toggleShuffle = useCallback(() => {
+    setIsShuffled((prev) => {
+      const next = !prev;
+      if (next) {
+        shuffleOrderRef.current = buildShuffleOrder(
+          queueRef.current.length,
+          indexRef.current,
+        );
+        shufflePosRef.current = 0;
+      }
+      return next;
+    });
+  }, []);
+
   const playSimilar = useCallback(
     async (track: Track) => {
       setIsLoadingSimilar(true);
@@ -354,6 +437,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     duration,
     volume,
     repeatMode,
+    isShuffled,
     isLoadingSimilar,
     playTrack,
     playQueue,
@@ -365,6 +449,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     seekTo,
     setVolume,
     cycleRepeat,
+    toggleShuffle,
     playSimilar,
   };
 
