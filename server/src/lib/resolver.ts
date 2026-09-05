@@ -7,7 +7,7 @@ interface CacheEntry {
 }
 
 const TTL_MS = Number(process.env.STREAM_CACHE_TTL_MS) || 4 * 60 * 60 * 1000;
-const RESOLVE_TIMEOUT_MS = 15_000;
+const RESOLVE_TIMEOUT_MS = Number(process.env.RESOLVE_TIMEOUT_MS) || 45_000;
 
 const cache = new Map<string, CacheEntry>();
 const inFlight = new Map<string, Promise<string>>();
@@ -37,14 +37,17 @@ export async function resolveStreamUrl(videoId: string): Promise<string> {
 
 async function resolveFresh(videoId: string): Promise<string> {
   const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const startedAt = Date.now();
 
+  let timeoutId: NodeJS.Timeout;
   const timeout = new Promise<never>((_, reject) => {
-    setTimeout(
+    timeoutId = setTimeout(
       () => reject(new StreamResolutionError('timeout', 504, 'yt-dlp tardó demasiado')),
       RESOLVE_TIMEOUT_MS,
     );
   });
 
+  console.log(`[resolver] resolviendo ${videoId}...`);
   try {
     const result = await Promise.race([
       youtubedl(videoUrl, {
@@ -61,10 +64,14 @@ async function resolveFresh(videoId: string): Promise<string> {
     if (!url) {
       throw new StreamResolutionError('unknown', 500, 'yt-dlp no devolvió una URL');
     }
+    console.log(`[resolver] ${videoId} resuelto en ${Date.now() - startedAt}ms`);
     return url;
   } catch (err) {
+    console.error(`[resolver] falló ${videoId} tras ${Date.now() - startedAt}ms:`, err);
     if (err instanceof StreamResolutionError) throw err;
     const stderr = (err as { stderr?: string })?.stderr ?? String(err);
     throw classifyYtDlpError(stderr);
+  } finally {
+    clearTimeout(timeoutId!);
   }
 }
