@@ -52,11 +52,18 @@ async function resolveFresh(videoId: string): Promise<string> {
     const result = await Promise.race([
       youtubedl(videoUrl, {
         getUrl: true,
-        format: 'bestaudio',
+        // "bestaudio" a secas puede no existir con el cliente "android" (ver
+        // comentario de extractorArgs); el fallback a "best" trae un
+        // formato combinado audio+video liviano que igual sirve para audio.
+        format: 'bestaudio/best',
         noWarnings: true,
         noCheckCertificate: true,
         preferFreeFormats: true,
-      }),
+        // Desde IPs de datacenter (como las de Render), el cliente "web" de
+        // YouTube suele fallar con "Failed to extract any player response"
+        // (bloqueo anti-bot). El cliente "android" lo evita.
+        extractorArgs: 'youtube:player_client=android',
+      } as Parameters<typeof youtubedl>[1]),
       timeout,
     ]);
 
