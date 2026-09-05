@@ -35,6 +35,11 @@ export async function resolveStreamUrl(videoId: string): Promise<string> {
   return promise;
 }
 
+// Distintos "clientes" de YouTube exponen/bloquean cosas distintas para el
+// mismo video (ver comentarios en cada uso). Se prueban en orden y se usa
+// el primero que resuelva.
+const PLAYER_CLIENTS = ['android', 'web'];
+
 async function resolveFresh(videoId: string): Promise<string> {
   const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
   const startedAt = Date.now();
@@ -49,8 +54,29 @@ async function resolveFresh(videoId: string): Promise<string> {
 
   console.log(`[resolver] resolviendo ${videoId}...`);
   try {
-    const result = await Promise.race([
-      youtubedl(videoUrl, {
+    const url = await Promise.race([resolveWithFallback(videoUrl, videoId), timeout]);
+    console.log(`[resolver] ${videoId} resuelto en ${Date.now() - startedAt}ms`);
+    return url;
+  } catch (err) {
+    console.error(`[resolver] falló ${videoId} tras ${Date.now() - startedAt}ms:`, err);
+    throw err;
+  } finally {
+    clearTimeout(timeoutId!);
+  }
+}
+
+/**
+ * Prueba cada cliente de YouTube en orden hasta que uno resuelva. Algunos
+ * bloqueos (anti-bot, restricciones de derechos) aplican a un cliente pero
+ * no a otro para el mismo video, así que reintentar con otro cliente
+ * recupera casos que de otra forma fallarían del todo.
+ */
+async function resolveWithFallback(videoUrl: string, videoId: string): Promise<string> {
+  let lastError: StreamResolutionError | null = null;
+
+  for (const playerClient of PLAYER_CLIENTS) {
+    try {
+      const result = await youtubedl(videoUrl, {
         getUrl: true,
         // "bestaudio" a secas puede no existir con el cliente "android" (ver
         // comentario de extractorArgs); el fallback a "best" trae un
@@ -59,26 +85,20 @@ async function resolveFresh(videoId: string): Promise<string> {
         noWarnings: true,
         noCheckCertificate: true,
         preferFreeFormats: true,
-        // Desde IPs de datacenter (como las de Render), el cliente "web" de
-        // YouTube suele fallar con "Failed to extract any player response"
-        // (bloqueo anti-bot). El cliente "android" lo evita.
-        extractorArgs: 'youtube:player_client=android',
-      } as Parameters<typeof youtubedl>[1]),
-      timeout,
-    ]);
+        extractorArgs: `youtube:player_client=${playerClient}`,
+      } as Parameters<typeof youtubedl>[1]);
 
-    const url = String(result).trim().split('\n')[0];
-    if (!url) {
-      throw new StreamResolutionError('unknown', 500, 'yt-dlp no devolvió una URL');
+      const url = String(result).trim().split('\n')[0];
+      if (!url) throw new StreamResolutionError('unknown', 500, 'yt-dlp no devolvió una URL');
+      return url;
+    } catch (err) {
+      lastError =
+        err instanceof StreamResolutionError
+          ? err
+          : classifyYtDlpError((err as { stderr?: string })?.stderr ?? String(err));
+      console.warn(`[resolver] ${videoId} falló con cliente "${playerClient}": ${lastError.code}`);
     }
-    console.log(`[resolver] ${videoId} resuelto en ${Date.now() - startedAt}ms`);
-    return url;
-  } catch (err) {
-    console.error(`[resolver] falló ${videoId} tras ${Date.now() - startedAt}ms:`, err);
-    if (err instanceof StreamResolutionError) throw err;
-    const stderr = (err as { stderr?: string })?.stderr ?? String(err);
-    throw classifyYtDlpError(stderr);
-  } finally {
-    clearTimeout(timeoutId!);
   }
+
+  throw lastError!;
 }
