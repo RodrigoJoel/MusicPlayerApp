@@ -11,11 +11,15 @@ acá está hecha realidad como proyecto propio.
 
 - **Buscador** de canciones que consulta la YouTube Data API v3 (búsqueda por
   texto, filtrada a la categoría "Música").
-- **Reproducción** vía la YouTube IFrame Player API oficial: play, pausa,
-  siguiente, anterior, barra de progreso y volumen. El audio suena normal
-  desde el navegador/celular, así que **Bluetooth a parlantes, auto o TV
-  funciona solo**, emparejando el dispositivo como con cualquier otro audio
-  del teléfono — la app no necesita programar nada especial para eso.
+- **Reproducción** vía un elemento `<audio>` nativo: play, pausa, siguiente,
+  anterior, barra de progreso y volumen. El audio lo sirve un backend propio
+  (carpeta `server/`) que resuelve el stream de cada video con `yt-dlp` — a
+  diferencia del iframe de YouTube (usado antes), esto permite que la música
+  siga sonando en iOS al minimizar la app o bloquear la pantalla. El audio
+  suena normal desde el navegador/celular, así que **Bluetooth a parlantes,
+  auto o TV funciona solo**, emparejando el dispositivo como con cualquier
+  otro audio del teléfono — la app no necesita programar nada especial para
+  eso.
 - **Biblioteca personal**: guardá canciones (título, artista/canal,
   miniatura y videoId) en `localStorage` y accedé a ellas después.
 - **Cola de reproducción** con función "similares": agrega más canciones del
@@ -30,12 +34,23 @@ acá está hecha realidad como proyecto propio.
 ## Stack
 
 React + TypeScript + Vite, `vite-plugin-pwa` para el manifest/service worker,
-CSS plano (sin frameworks) con un tema oscuro pensado mobile-first. Sin
-backend: todo corre en el navegador, contra la API pública de YouTube.
+CSS plano (sin frameworks) con un tema oscuro pensado mobile-first. La
+búsqueda sigue siendo 100% cliente contra la API pública de YouTube; hay un
+backend mínimo (Node/Express + `yt-dlp`, carpeta `server/`) que solo se
+encarga de resolver y servir el audio para la reproducción.
 
 ## Cómo correrlo
 
 ```bash
+npm install
+npm run dev
+```
+
+Además, para que la reproducción funcione, necesitás el backend corriendo
+(ver la sección [Backend](#backend-de-audio) más abajo):
+
+```bash
+cd server
 npm install
 npm run dev
 ```
@@ -76,10 +91,11 @@ alcanza cómodamente para uso personal — cada búsqueda consume 100 unidades.
    cp .env.example .env
    ```
 
-2. Completá tu key:
+2. Completá tu key y la URL del backend de audio:
 
    ```
    VITE_YOUTUBE_API_KEY=tu_api_key_acá
+   VITE_API_BASE_URL=http://localhost:3000
    ```
 
 3. Reiniciá `npm run dev` si ya lo tenías corriendo (Vite solo lee las
@@ -125,7 +141,37 @@ maneja el sistema operativo, no la app.
 
 > Nota: para que "Instalar app" aparezca tal cual, la app tiene que servirse
 > por HTTPS (o `localhost` en desarrollo). Cualquier hosting está bien
-> (Vercel, Netlify, GitHub Pages, etc.).
+> (Vercel, Netlify, GitHub Pages, etc.) para el frontend; el backend de audio
+> necesita un host con proceso Node persistente (ver sección de Backend).
+
+## Backend de audio
+
+El audio ya no se reproduce embebiendo un iframe de YouTube: un backend
+propio en `server/` resuelve, con `yt-dlp`, la URL directa del stream de
+audio de cada video y la sirve con soporte de `Range` (para poder buscar
+dentro de la canción). El frontend reproduce eso con un `<audio>` HTML
+nativo — que sí sigue sonando en segundo plano en iOS, a diferencia del
+iframe de YouTube.
+
+**Correrlo local:**
+
+```bash
+cd server
+npm install
+npm run dev   # http://localhost:3000
+```
+
+Variables de entorno (`server/.env`, copiar de `server/.env.example`):
+`PORT`, `ALLOWED_ORIGIN` (origen del frontend permitido por CORS) y
+`STREAM_CACHE_TTL_MS` (cuánto cachear la URL resuelta antes de volver a
+invocar `yt-dlp`).
+
+**Deploy:** necesita un host con proceso Node persistente y capacidad de
+correr un `Dockerfile` (yt-dlp requiere Python + ffmpeg) — Railway o Render
+funcionan bien y tienen plan gratuito. Netlify/Vercel/GitHub Pages **no**
+sirven para esto (son hosting estático), pero siguen siendo una opción
+válida para el frontend, seteando `VITE_API_BASE_URL` apuntando al backend
+desplegado.
 
 ## Estructura del proyecto
 
@@ -133,16 +179,17 @@ maneja el sistema operativo, no la app.
 src/
   api/
     youtube.ts          # búsqueda YouTube Data API v3 + modo demo/mock + "similares"
+    stream.ts             # arma la URL del endpoint propio de audio (server/)
   components/
     SearchView.tsx       # buscador + resultados
     LibraryView.tsx       # biblioteca guardada
     QueueView.tsx         # cola de reproducción
-    NowPlayingBar.tsx     # mini reproductor persistente (monta el iframe de YouTube)
+    NowPlayingBar.tsx     # mini reproductor persistente
     TrackRow.tsx           # fila reutilizable de canción (buscador/biblioteca/cola)
     BottomNav.tsx           # navegación inferior mobile-first
     Icon.tsx                 # set de íconos SVG inline, sin dependencias
   context/
-    PlayerContext.tsx    # estado global del reproductor (cola, YT IFrame Player, controles)
+    PlayerContext.tsx    # estado global del reproductor (cola, <audio> nativo, controles)
   hooks/
     useLibrary.ts         # persistencia de biblioteca en localStorage
   types/
@@ -153,15 +200,25 @@ src/
   index.css                   # tema oscuro, mobile-first, sin frameworks CSS
 public/
   icons/                      # íconos PWA (generados: 192, 512, maskable, apple-touch)
+server/
+  src/index.ts                # servidor Express (rutas /api/health, /api/stream/:videoId)
+  src/lib/resolver.ts          # resuelve la URL de audio con yt-dlp (con cache)
+  src/lib/rangeProxy.ts        # proxy con soporte de Range hacia el CDN de YouTube
+  Dockerfile                   # imagen para deploy (Node + Python + ffmpeg)
 vite.config.ts                # config de Vite + vite-plugin-pwa (manifest, service worker)
 ```
 
 ## Decisiones de diseño y alcance
 
-- **Sin descarga/ripping de audio.** La reproducción es 100% vía el iframe
-  oficial de YouTube (IFrame Player API), controlado por nuestra UI pero
-  ejecutado por YouTube. Esto respeta los Términos de Servicio de YouTube:
-  nunca se extrae ni se guarda el audio, solo se reproduce embebido.
+- **El backend resuelve el stream de audio con `yt-dlp` (fuera de los ToS de
+  YouTube).** Es una decisión consciente: el iframe oficial de YouTube no
+  sostiene la reproducción en segundo plano en iOS, y la única forma real de
+  arreglar eso es servir el audio como un `<audio>` nativo. El backend no
+  descarga ni persiste el archivo en disco, solo resuelve la URL y hace de
+  proxy — pero técnicamente sigue violando los Términos de Servicio de
+  YouTube (prohíben extraer streams fuera de su reproductor oficial). Es un
+  trade-off aceptado para este proyecto personal, no algo para replicar sin
+  pensar el riesgo en un producto con más usuarios.
 - **"Similares" = búsqueda por canal**, no relacionados nativos. La YouTube
   Data API v3 discontinuó el parámetro `relatedToVideoId`, así que el MVP
   arma la sugerencia buscando más resultados del mismo canal/artista. Es una
@@ -177,12 +234,10 @@ vite.config.ts                # config de Vite + vite-plugin-pwa (manifest, serv
   `localStorage` alcanza y evita la complejidad de IndexedDB. Si a futuro la
   biblioteca crece mucho, se puede migrar sin cambiar la interfaz del hook
   `useLibrary`.
-- **Video minimizado, no oculto del todo.** El player de YouTube se monta
-  siempre (para poder reproducir sin recrearlo en cada canción) pero a
-  tamaño mini (56×56px) dentro del "now playing bar", como si fuera el
-  ícono/carátula de la canción. Ocultarlo del todo con `display: none` puede
-  hacer que algunos navegadores pausen el reproductor en segundo plano, así
-  que se prefirió dejarlo visible pero minimizado.
+- **La carátula del "now playing bar" es una imagen, no el reproductor
+  real.** El `<audio>` que reproduce el sonido no está en el DOM (se crea
+  programáticamente), así que no hay nada que ocultar ni minimizar — la
+  miniatura de 56×56px que se ve es simplemente la `thumbnail` del track.
 
 ## Qué quedó afuera del MVP (roadmap futuro)
 
@@ -211,5 +266,12 @@ vite.config.ts                # config de Vite + vite-plugin-pwa (manifest, serv
   superás, la búsqueda va a devolver un error visible en la UI (banner
   rojo) hasta que se resetee la cuota (renueva a medianoche, hora del
   Pacífico) o generes otra key.
-- El proyecto no tiene backend ni base de datos: todo el estado (biblioteca,
-  cola) vive en el navegador de cada usuario.
+- El proyecto no tiene base de datos: todo el estado (biblioteca, cola) vive
+  en el navegador de cada usuario. Sí hay un backend chico (`server/`, ver
+  sección [Backend de audio](#backend-de-audio)) que solo resuelve/proxysea
+  el stream de audio — no guarda nada persistente del lado del servidor más
+  allá de una cache en memoria de corta duración.
+- Si un video falla al resolverse (restringido, borrado, bloqueado por
+  región, o yt-dlp tarda demasiado), la app muestra un banner de error en el
+  mini reproductor y salta automáticamente a la siguiente canción de la
+  cola.

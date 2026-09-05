@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { usePlayer, YT_PLAYER_ROOT_ID } from '../context/PlayerContext';
+import { usePlayer } from '../context/PlayerContext';
 import { formatTime } from '../utils/format';
 import {
   NextIcon,
@@ -20,6 +20,7 @@ export function NowPlayingBar() {
     volume,
     repeatMode,
     isShuffled,
+    playbackError,
     togglePlay,
     next,
     previous,
@@ -37,25 +38,12 @@ export function NowPlayingBar() {
 
   return (
     <div className={`now-playing${hasTrack ? '' : ' now-playing--empty'}`}>
-      
-      {/* TRUCO ANTI-ANUNCIOS: El player real de YouTube ahora vive oculto fuera de pantalla */}
-      <div 
-        className="now-playing__hidden-video"
-        style={{
-          width: '0px',
-          height: '0px',
-          overflow: 'hidden',
-          position: 'absolute',
-          top: '-9999px',
-          left: '-9999px',
-          opacity: 0,
-          pointerEvents: 'none'
-        }}
-      >
-        <div id={YT_PLAYER_ROOT_ID} />
-      </div>
+      {playbackError && (
+        <div className="banner banner--error now-playing__error">
+          {playbackError}
+        </div>
+      )}
 
-      {/* INTERFAZ VISUAL: Renderizamos una carátula estática en lugar del iframe de YT */}
       <div className="now-playing__video">
         {hasTrack ? (
           <img 

@@ -9,15 +9,7 @@ import {
 } from 'react';
 import type { RepeatMode, Track } from '../types/track';
 import { getSimilarTracks } from '../api/youtube';
-
-declare global {
-  interface Window {
-    onYouTubeIframeAPIReady?: () => void;
-  }
-}
-
-/** id del <div> donde se monta el iframe real del reproductor de YouTube */
-export const YT_PLAYER_ROOT_ID = 'yt-player-root';
+import { getStreamUrl } from '../api/stream';
 
 interface PlayerContextValue {
   currentTrack: Track | null;
@@ -31,6 +23,7 @@ interface PlayerContextValue {
   repeatMode: RepeatMode;
   isShuffled: boolean;
   isLoadingSimilar: boolean;
+  playbackError: string | null;
   playTrack: (track: Track, queueContext?: Track[]) => void;
   playQueue: (tracks: Track[], startIndex?: number) => void;
   addToQueue: (tracks: Track[]) => void;
@@ -47,7 +40,11 @@ interface PlayerContextValue {
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
 
-let apiLoadPromise: Promise<void> | null = null;
+// El audio real vive en un elemento <audio> nativo (no en un iframe de
+// YouTube), para que iOS pueda seguir reproduciéndolo en segundo plano.
+// Es un singleton a nivel de módulo (como antes lo era `apiLoadPromise`):
+// no es estado de React, es un objeto externo mutable de larga vida.
+const audio = new Audio();
 
 /**
  * Genera un orden aleatorio de índices de `length` elementos. Si `anchorIdx`
@@ -63,33 +60,7 @@ function buildShuffleOrder(length: number, anchorIdx: number): number[] {
   return anchorIdx >= 0 && anchorIdx < length ? [anchorIdx, ...rest] : rest;
 }
 
-/** Carga el script externo de la YouTube IFrame Player API una sola vez. */
-function loadYouTubeApi(): Promise<void> {
-  if (apiLoadPromise) return apiLoadPromise;
-
-  apiLoadPromise = new Promise((resolve) => {
-    if (window.YT && window.YT.Player) {
-      resolve();
-      return;
-    }
-    if (!document.getElementById('youtube-iframe-api')) {
-      const tag = document.createElement('script');
-      tag.id = 'youtube-iframe-api';
-      tag.src = 'https://www.youtube.com/iframe_api';
-      document.head.appendChild(tag);
-    }
-    const previous = window.onYouTubeIframeAPIReady;
-    window.onYouTubeIframeAPIReady = () => {
-      previous?.();
-      resolve();
-    };
-  });
-
-  return apiLoadPromise;
-}
-
 export function PlayerProvider({ children }: { children: ReactNode }) {
-  const playerRef = useRef<YT.Player | null>(null);
   const queueRef = useRef<Track[]>([]);
   const indexRef = useRef(-1);
   const repeatRef = useRef<RepeatMode>('off');
@@ -98,7 +69,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const shuffleOrderRef = useRef<number[]>([]);
   const shufflePosRef = useRef(0);
 
-  const [isReady, setIsReady] = useState(false);
   const [queue, setQueue] = useState<Track[]>([]);
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -108,6 +78,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [repeatMode, setRepeatMode] = useState<RepeatMode>('off');
   const [isShuffled, setIsShuffled] = useState(false);
   const [isLoadingSimilar, setIsLoadingSimilar] = useState(false);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
 
   useEffect(() => {
     queueRef.current = queue;
@@ -133,17 +104,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     shufflePosRef.current = 0;
   }, [queue, isShuffled]);
 
-  const loadIndex = useCallback((idx: number, tracks: Track[]) => {
-    if (idx < 0 || idx >= tracks.length) return;
-    setCurrentIndex(idx);
-    setProgress(0);
-    setDuration(0);
-    const track = tracks[idx];
-    if (playerRef.current) {
-      playerRef.current.loadVideoById(track.videoId);
-      playerRef.current.setVolume(volumeRef.current);
-    }
-  }, []);
+  const loadIndex = useCallback(
+    (idx: number, tracks: Track[]) => {
+      if (idx < 0 || idx >= tracks.length) return;
+      setCurrentIndex(idx);
+      setProgress(0);
+      setDuration(0);
+      setPlaybackError(null);
+      const track = tracks[idx];
+      audio.src = getStreamUrl(track.videoId);
+      audio.volume = volumeRef.current / 100;
+      audio.play().catch(() => {});
+    },
+    [],
+  );
 
   const playByIndex = useCallback(
     (idx: number, tracks: Track[]) => {
@@ -184,9 +158,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const previous = useCallback(() => {
     const tracks = queueRef.current;
     if (tracks.length === 0) return;
-    const current = playerRef.current?.getCurrentTime?.() ?? 0;
-    if (current > 3) {
-      playerRef.current?.seekTo(0, true);
+    if (audio.currentTime > 3) {
+      audio.currentTime = 0;
       setProgress(0);
       return;
     }
@@ -210,64 +183,47 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     loadIndex(prevIdx, tracks);
   }, [loadIndex]);
 
-  // Inicializa el player de YouTube una sola vez, montado en un <div> fijo.
+  // Eventos nativos del elemento <audio>: reemplazan el polling y los
+  // callbacks que antes daba la YouTube IFrame Player API.
   useEffect(() => {
-    let cancelled = false;
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
+    const handleLoadedMetadata = () => setDuration(audio.duration || 0);
+    const handleTimeUpdate = () => setProgress(audio.currentTime);
+    const handleEnded = () => {
+      if (repeatRef.current === 'one') {
+        audio.currentTime = 0;
+        audio.play().catch(() => {});
+      } else {
+        next();
+      }
+    };
+    const handleError = () => {
+      const track = queueRef.current[indexRef.current];
+      setPlaybackError(
+        track
+          ? `No se pudo reproducir "${track.title}"`
+          : 'No se pudo reproducir la canción',
+      );
+      next();
+    };
 
-    loadYouTubeApi().then(() => {
-      if (cancelled) return;
-      playerRef.current = new YT.Player(YT_PLAYER_ROOT_ID, {
-        height: '100%',
-        width: '100%',
-        playerVars: {
-          playsinline: 1,
-          controls: 0,
-          disablekb: 1,
-          rel: 0,
-          modestbranding: 1,
-        },
-        events: {
-          onReady: (event) => {
-            event.target.setVolume(volumeRef.current);
-            setIsReady(true);
-          },
-          onStateChange: (event) => {
-            if (event.data === YT.PlayerState.PLAYING) {
-              setIsPlaying(true);
-              setDuration(playerRef.current?.getDuration() ?? 0);
-            } else if (event.data === YT.PlayerState.PAUSED) {
-              setIsPlaying(false);
-            } else if (event.data === YT.PlayerState.ENDED) {
-              if (repeatRef.current === 'one') {
-                playerRef.current?.seekTo(0, true);
-                playerRef.current?.playVideo();
-              } else {
-                next();
-              }
-            }
-          },
-        },
-      });
-    });
+    audio.addEventListener('play', handlePlay);
+    audio.addEventListener('pause', handlePause);
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('error', handleError);
 
     return () => {
-      cancelled = true;
+      audio.removeEventListener('play', handlePlay);
+      audio.removeEventListener('pause', handlePause);
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('error', handleError);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Polling liviano del progreso mientras se reproduce.
-  useEffect(() => {
-    if (!isPlaying) return;
-    const id = window.setInterval(() => {
-      const player = playerRef.current;
-      if (!player) return;
-      setProgress(player.getCurrentTime());
-      const d = player.getDuration();
-      if (d && d !== duration) setDuration(d);
-    }, 500);
-    return () => window.clearInterval(id);
-  }, [isPlaying, duration]);
+  }, [next]);
 
   const playQueue = useCallback(
     (tracks: Track[], startIndex = 0) => {
@@ -313,21 +269,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const togglePlay = useCallback(() => {
-    const player = playerRef.current;
-    if (!player) return;
-    if (isPlaying) player.pauseVideo();
-    else player.playVideo();
+    if (isPlaying) audio.pause();
+    else audio.play().catch(() => {});
   }, [isPlaying]);
 
   const seekTo = useCallback((seconds: number) => {
-    playerRef.current?.seekTo(seconds, true);
+    audio.currentTime = seconds;
     setProgress(seconds);
   }, []);
 
   const setVolume = useCallback((value: number) => {
     setVolumeState(value);
     volumeRef.current = value;
-    playerRef.current?.setVolume(value);
+    audio.volume = value / 100;
   }, []);
 
   const cycleRepeat = useCallback(() => {
@@ -364,21 +318,24 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   );
 
   const currentTrack = currentIndex >= 0 ? (queue[currentIndex] ?? null) : null;
+  // Ya no depende de cargar una API externa (como pasaba con el IFrame de
+  // YouTube): el elemento <audio> nativo está listo desde el primer render.
+  const isReady = true;
 
   // Controles del sistema (pantalla de bloqueo, auriculares, auto) vía Media Session API.
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;
     navigator.mediaSession.setActionHandler('play', () => {
-      playerRef.current?.playVideo();
+      audio.play().catch(() => {});
     });
     navigator.mediaSession.setActionHandler('pause', () => {
-      playerRef.current?.pauseVideo();
+      audio.pause();
     });
     navigator.mediaSession.setActionHandler('previoustrack', () => previous());
     navigator.mediaSession.setActionHandler('nexttrack', () => next());
     navigator.mediaSession.setActionHandler('seekto', (details) => {
       if (details.seekTime == null) return;
-      playerRef.current?.seekTo(details.seekTime, true);
+      audio.currentTime = details.seekTime;
       setProgress(details.seekTime);
     });
     return () => {
@@ -439,6 +396,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     repeatMode,
     isShuffled,
     isLoadingSimilar,
+    playbackError,
     playTrack,
     playQueue,
     addToQueue,

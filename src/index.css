@@ -419,16 +419,12 @@ code {
   background: #000;
 }
 
-/* TRUCO ANTI-ANUNCIOS: Forzamos al iframe a quedar fuera de la vista del navegador */
-.now-playing__hidden-video {
-  width: 0px !important;
-  height: 0px !important;
-  overflow: hidden !important;
-  position: absolute !important;
-  top: -9999px !important;
-  left: -9999px !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
+.now-playing__error {
+  position: absolute;
+  bottom: 100%;
+  left: 12px;
+  right: 12px;
+  margin-bottom: 8px;
 }
 
 .now-playing__video-placeholder {
