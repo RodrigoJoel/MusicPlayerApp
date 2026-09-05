@@ -78,10 +78,10 @@ async function resolveWithFallback(videoUrl: string, videoId: string): Promise<s
     try {
       const result = await youtubedl(videoUrl, {
         getUrl: true,
-        // "bestaudio" a secas puede no existir con el cliente "android" (ver
-        // comentario de extractorArgs); el fallback a "best" trae un
-        // formato combinado audio+video liviano que igual sirve para audio.
-        format: 'bestaudio/best',
+        // Safari/iOS no decodifica Opus/WebM (el formato que "bestaudio" a
+        // secas suele elegir); se fuerza AAC/M4A, que sí soporta, con
+        // fallback a mp4 muxeado (también AAC) y por último a lo que haya.
+        format: 'bestaudio[ext=m4a]/best[ext=mp4]/bestaudio/best',
         noWarnings: true,
         noCheckCertificate: true,
         preferFreeFormats: true,
