@@ -1,6 +1,6 @@
 FROM node:20-slim AS build
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends python3 ffmpeg \
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python-is-python3 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
 RUN npm install
@@ -10,7 +10,7 @@ RUN npm run build
 
 FROM node:20-slim
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends python3 ffmpeg \
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python-is-python3 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
 RUN npm install --omit=dev
